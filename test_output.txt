@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.5, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/kallif/Documents/Dope/block/Simulations/GeoSim(AI)/geoconomicsmk2/geoconomicsmk5 (raw)
+plugins: anyio-4.9.0
+collected 7 items
+
+test_sprint1.py .....DEBUG: World module file: /Users/kallif/Documents/Dope/block/Simulations/GeoSim(AI)/geoconomicsmk2/geoconomicsmk5 (raw)/world.py
+18:00:22 - INFO - Generating terrain and placing nations...
+TEST: Calling _update_climate
+F.
+
+=================================== FAILURES ===================================
+_____________________________ test_climate_tipping _____________________________
+
+config = SimulationConfig(num_nations=10, num_steps=100, realism_level='high', enable_gold_standard=False, output_dir=PosixPath...an=2.5, pandemic_r0_std=1.0, pandemic_lethality_mean=0.01, pandemic_lethality_std=0.005, pandemic_vaccine_time_mean=15)
+
+    def test_climate_tipping(config):
+        import world as world_module
+        print(f"DEBUG: World module file: {world_module.__file__}")
+        world = World(config)
+        # Set carbon to trigger index > 1.5
+        # Index = Carbon / 1e12
+        world.cumulative_carbon = 2.0e12
+        print("TEST: Calling _update_climate")
+    
+        # Mock update
+        world._update_climate()
+    
+>       assert "permafrost" in world.tipping_points_triggered
+E       AssertionError: assert 'permafrost' in set()
+E        +  where set() = <world.World object at 0x10b078aa0>.tipping_points_triggered
+
+test_sprint1.py:103: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     geosim:world.py:150 Generating terrain and placing nations...
+=========================== short test summary info ============================
+FAILED test_sprint1.py::test_climate_tipping - AssertionError: assert 'permaf...
+========================= 1 failed, 6 passed in 0.45s ==========================

@@ -1,0 +1,30 @@
+{
+  "config": {
+    "nations": 20,
+    "steps": 50,
+    "realism_level": "high"
+  },
+  "performance": {
+    "total_time": 0.1297149658203125,
+    "time_per_step": 0.00259429931640625
+  },
+  "final_stats": {
+    "living_nations": 19,
+    "global_gdp": 1849115500651.1133,
+    "global_population": 6012197418.837779,
+    "climate_index": 6.419891361200341e-12,
+    "nuclear_detonations": 0,
+    "global_trade_volume": 762218373819.1448
+  },
+  "verification": {
+    "max_alliances": 1,
+    "carbon_budget_pct": 4.279927574133561e-10,
+    "colonial_nations": 1,
+    "currency_regimes": {
+      "gold": 0,
+      "pegged": 1,
+      "floating": 18
+    },
+    "dead_nations_at_war": 0
+  }
+}
