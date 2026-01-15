@@ -91,6 +91,29 @@ class GlobalEconomy:
                     
                     distance = max(1.0, distance) # Avoid zero division
                 
+                # Chokepoint blockade check (NEW)
+                route_blocked = False
+                if hex_grid and hex_grid.chokepoints:
+                    # Simple heuristic: if route is long-distance (>30 tiles), check for blockaded chokepoints
+                    if distance > 30:
+                        for chokepoint in hex_grid.chokepoints:
+                            if chokepoint in hex_grid.blockaded_chokepoints:
+                                # Check if this chokepoint might affect the route
+                                # (between the two nations' centroids)
+                                choke_x, choke_y = chokepoint
+                                # If chokepoint is roughly between the two nations, route is blocked
+                                dist_a_choke = hex_grid.distance(int(cx_a), int(cy_a), choke_x, choke_y)
+                                dist_b_choke = hex_grid.distance(int(cx_b), int(cy_b), choke_x, choke_y)
+                                
+                                # If chokepoint is along the path (sum of distances ≈ direct distance)
+                                if abs((dist_a_choke + dist_b_choke) - distance) < 10:
+                                    route_blocked = True
+                                    break
+                
+                if route_blocked:
+                    # Trade volume drastically reduced by blockade
+                    continue  # Skip this trade route entirely
+                
                 # Gravity model
                 gravity = (nation_a.gdp * nation_b.gdp) / (distance ** 2)
                 
@@ -232,15 +255,18 @@ class GlobalEconomy:
                     
                     # Check for colonial subject status based on total stock vs GDP
                     total_stock = sum(n.fdi_positions.get(target.id, 0) for n in nations)
-                    if total_stock > target.gdp * 0.5:
+                if total_stock > target.gdp * 0.5:
                         # High dependency risk (simplified: if this investor is dominant)
                         if investor.fdi_positions[target.id] > total_stock * 0.5:
                             investor.colonial_subjects.add(target.id)
 
-    def process_colonial_relations(self, nations: List[Nation]):
+    def process_colonial_relations(self, nations: List[Nation], event_system: Any = None):
         """
-        Handle economic extraction from colonies and independence movements.
+        Handle resource extraction and independence movements.
         """
+        # Create lookup dict for efficient nation access
+        nations_dict = {n.id: n for n in nations}
+        
         for nation in nations:
             # 1. Pay tribute to colonizers
             # If nation is a subject of others (check all nations to find masters)
@@ -301,10 +327,18 @@ class GlobalEconomy:
                 for other_subject_id in nation.colonial_subjects:
                     if other_subject_id != subject.id:
                         other_subject = nations_dict.get(other_subject_id)
-                        if other_subject and other_subject.technology > 60:
-                            coalition_bonus += 0.02  # Each potential ally adds 2%
-                
                 revolt_prob += min(0.1, coalition_bonus)  # Cap at 10% bonus
+                
+                # Decolonization Wave Effect (cascade mechanism)
+                # Check if there have been recent independence events
+                if event_system and hasattr(event_system, 'recent_independence_events'):
+                    recent_independences = [e for e in event_system.recent_independence_events 
+                                           if step - e[0] < 10]  # Last 10 steps
+                    
+                    if len(recent_independences) >= 2:
+                        # Decolonization wave active - Bandung Conference effect
+                        wave_multiplier = 1 + len(recent_independences) * 0.3
+                        revolt_prob *= wave_multiplier
                 
                 if random.random() < revolt_prob:
                     # Independence War / Peaceful Separation
@@ -320,6 +354,10 @@ class GlobalEconomy:
                         nation.fdi_outflows -= seized  # Write off
                         # Subject gains assets (nationalization) -> capital stock boost
                         subject.capital_stock += seized
+                    
+                    # Record independence event for wave tracking
+                    if event_system:
+                        event_system.record_independence_event(nation.id, subject.id)
                     
                     # Form alliance with other recent independence movements
                     for other_subject_id in list(nation.colonial_subjects):
@@ -385,6 +423,8 @@ class GlobalEconomy:
                             # Recursive contagion could happen next step
                 
                 return True
+        
+        return False  # No crisis occurred
         
         # Speculative Attack Check (Interest Rate Parity)
         if self._check_speculative_attack(nation):

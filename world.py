@@ -5,6 +5,9 @@ Manages nations, global systems, and turn-by-turn mechanics.
 
 from typing import List, Dict, Tuple
 import random
+import json
+import logging
+from pathlib import Path
 import numpy as np
 
 from nation import Nation, Currency
@@ -18,6 +21,8 @@ from logger import setup_logger
 logger = setup_logger()
 from config import SimulationConfig, GOVERNMENT_TYPES, NATION_NAME_PARTS
 from viz import Visualizer
+from dashboard import Dashboard
+from network_viz import NetworkVisualizer
 
 
 class World:
@@ -28,18 +33,26 @@ class World:
         self.nations: List[Nation] = []
         self.step = 0
         
+        # Output directory for maps and data
+        self.output_dir = Path("output")
+        self.output_dir.mkdir(exist_ok=True)
+        
         # Global systems
         self.economy = GlobalEconomy(config)
         self.events = EventSystem(config)
         self.combat = WarSystem(config)
         self.un = UnitedNations(config)
         self.visualizer = Visualizer(config)
+        self.viz = self.visualizer
+        self.dashboard = Dashboard(config)
+        self.net_viz = NetworkVisualizer(config)
         
         # Global state
         self.climate_index = 0.0
         self.cumulative_carbon = 0.0
         self.tipping_points_triggered = set()
         self.nuclear_winter_active = False
+        self.nuclear_winter_start = -1  # Track when nuclear winter began
         
         # Initialize geography
         self.hex_grid = HexGrid(config.world_width, config.world_height)
@@ -164,6 +177,13 @@ class World:
                     tiles = self._claim_tiles(self.grid, start_x, start_y, 10, nation.id)
                     nation.territory_tiles = tiles
                     
+                    # Mark capital
+                    if tiles:
+                         cx, cy = tiles[0]
+                         nation.capital_loc = (cx, cy)
+                         if (cy, cx) in self.hex_grid.cells:
+                             self.hex_grid.cells[(cy, cx)].is_capital = True
+                    
                     # Assign resources based on terrain
                     self._assign_resources(nation)
                     
@@ -185,6 +205,43 @@ class World:
                         break
                 if nation.is_coastal:
                     break
+        
+        # Assign strategic chokepoint control
+        self._assign_chokepoint_control()
+    
+    
+    def _assign_chokepoint_control(self):
+        """Assign control of strategic chokepoints to nations with naval presence."""
+        for chokepoint in self.hex_grid.chokepoints:
+            cx, cy = chokepoint
+            
+            # Find closest nation with naval power
+            best_nation = None
+            best_score = -1
+            
+            for nation in self.nations:
+                if nation.population == 0 or not nation.is_coastal:
+                    continue
+                
+                # Calculate distance from nation territory to chokepoint
+                if nation.territory_tiles:
+                    min_dist = min(
+                        self.hex_grid.distance(tx, ty, cx, cy)
+                        for tx, ty in nation.territory_tiles
+                    )
+                    
+                    # Score = naval power / distance
+                    naval_power = nation.military_power.get("navy", 0)
+                    score = naval_power / max(1, min_dist)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_nation = nation
+            
+            # Assign control
+            if best_nation:
+                self.hex_grid.chokepoint_control[chokepoint] = best_nation.id
+                logger.info(f"Chokepoint at {chokepoint} controlled by {best_nation.name}")
     
     def _assign_resources(self, nation: Nation):
         """Assign resources based on terrain types in territory."""
@@ -201,9 +258,13 @@ class World:
                 nation.resources["water"] += random.uniform(8, 12)
             elif terrain == TerrainType.DESERT:
                 nation.resources["oil"] += random.uniform(0, 20) # Oil in deserts
+                if (y, x) in self.hex_grid.cells and random.random() < 0.3:
+                    self.hex_grid.cells[(y, x)].resource_type = 'oil'
             elif terrain == TerrainType.MOUNTAIN:
                 nation.resources["rare_earth"] += random.uniform(0, 20) # Minerals in mountains
                 nation.resources["water"] += random.uniform(5, 15) # Headwaters
+                if (y, x) in self.hex_grid.cells and random.random() < 0.3:
+                    self.hex_grid.cells[(y, x)].resource_type = 'rare_earth'
                 
     def _claim_tiles(self, grid: np.ndarray, start_x: int, start_y: int, 
                     num_tiles: int, nation_id: int) -> List[Tuple[int, int]]:
@@ -211,6 +272,8 @@ class World:
         claimed = []
         queue = [(start_x, start_y)]
         grid[start_y, start_x] = nation_id
+        if (start_y, start_x) in self.hex_grid.cells:
+            self.hex_grid.cells[(start_y, start_x)].owner_id = nation_id
         claimed.append((start_x, start_y))
         
         while len(claimed) < num_tiles and queue:
@@ -223,6 +286,8 @@ class World:
             for nx, ny in neighbors:
                 if grid[ny, nx] == -1 and self.hex_grid.terrain[ny, nx] != TerrainType.OCEAN:
                     grid[ny, nx] = nation_id
+                    if (ny, nx) in self.hex_grid.cells:
+                        self.hex_grid.cells[(ny, nx)].owner_id = nation_id
                     claimed.append((nx, ny))
                     queue.append((nx, ny))
                     if len(claimed) >= num_tiles:
@@ -251,9 +316,8 @@ class World:
             # Monetary policy
             nation.manage_monetary_policy(self.config)
         
-        # FDI flows
-        self.economy.process_fdi_flows(self.nations)
-        self.economy.process_colonial_relations(self.nations)
+        # Colonial relations (FDI already processed above at line 241)
+        self.economy.process_colonial_relations(self.nations, event_system=self.events)
         
         # Exchange rates
         self.economy.update_exchange_rates(self.nations)
@@ -294,22 +358,100 @@ class World:
             if nation.population > 0:
                 nation.update_health(self.config)
                 nation.update_population(self.config)
+                nation.update_inequality()  # Update domestic Gini coefficient
                 nation.update_stability(self.config)
         
-        # h. War system
+        # h. Warfare (including nuclear exchange checks)
+        # Pass hex_grid to combat for chokepoint blockade logic
+        self.combat.hex_grid = self.hex_grid
+        
         war_triggers = self.combat.check_war_triggers(self.nations)
         for attacker_id, defender_id, cause in war_triggers:
             event = self.combat.initiate_war(attacker_id, defender_id, cause, self.nations)
             events.append(event)
         
+        # Check for alliance interventions in active wars
+        un_system = self.un  # Assuming UN has the alliance methods
+        interventions = un_system.check_alliance_interventions(
+            self.combat.active_wars, 
+            self.nations, 
+            self.economy
+        )
+        
+        # Apply interventions
+        for ally_id, war, side in interventions:
+            if side == "defender":
+                war["defender_allies"].append(ally_id)
+            else:
+                war["attacker_allies"].append(ally_id)
+        
         war_events = self.combat.resolve_wars(self.nations)
         events.extend(war_events)
+        
+        # Clear blockades if no wars active
+        if not self.combat.active_wars:
+            self.hex_grid.blockaded_chokepoints.clear()
         
         # Check nuclear winter
         if not self.nuclear_winter_active and self.combat.check_nuclear_winter():
             event = self.combat.apply_nuclear_winter(self.nations)
             events.append(event)
             self.nuclear_winter_active = True
+            self.nuclear_winter_start = step
+        
+        # Nuclear winter recovery
+        if self.nuclear_winter_active:
+            recovery_rate = 0.01  # 1% GDP recovery per year
+            for nation in self.nations:
+                if nation.population > 0:
+                    nation.gdp *= (1 + recovery_rate)
+                    nation.health = min(100, nation.health + 0.5)  # Slow health recovery
+            
+            # Recovery period: 50 steps
+            if step - self.nuclear_winter_start > 50:
+                self.nuclear_winter_active = False
+                logger.info(f"Nuclear winter recovery complete at step {step}")
+                events.append("NUCLEAR WINTER: Recovery period complete")
+        
+        # Apply oil embargo effects (stagflation)
+        for embargo in self.events.active_embargoes[:]:
+            if step - embargo["start_step"] > embargo["duration"]:
+                # Embargo ended
+                self.events.active_embargoes.remove(embargo)
+                events.append(f"OIL EMBARGO LIFTED: {embargo['initiator_name']} resumes normal exports")
+                logger.info(f"Oil embargo by {embargo['initiator_name']} has ended")
+            else:
+                # Apply stagflation to all nations except initiator
+                for nation in self.nations:
+                    if nation.id != embargo["initiator_id"] and nation.population > 0:
+                        # Stagflation: GDP drop + inflation rise
+                        nation.gdp *= (1 - embargo["severity"] * 0.05)  # -1.5% to -2.5% GDP per step
+                        nation.inflation_rate += embargo["severity"] * 0.1  # +3% to +5% inflation
+        
+        # Check for new oil embargoes from active wars
+        embargo_event = self.events.check_oil_embargo(self.nations, self.combat.active_wars, step)
+        if embargo_event:
+            events.append(embargo_event)
+        
+        # 6. Visualization (Enhanced)
+        if step % 2 == 0:  # Map every 2 steps
+             map_path = self.output_dir / f"world_map_{step:04d}.png"
+             self.viz.create_world_map(self.hex_grid, self.nations, map_path, self.combat.active_wars)
+             
+             # Dashboard
+             dash_path = self.output_dir / f"dashboard_{step:04d}.png"
+             global_stats = {
+                 "global_gdp": sum(n.gdp for n in self.nations),
+                 "global_population": sum(n.population for n in self.nations),
+                 "active_wars_count": len(self.combat.active_wars),
+                 "climate_index": self.climate_index
+             }
+             self.dashboard.create_realtime_dashboard(step, self.nations, global_stats, events, dash_path)
+             
+             # Network Viz (Less frequent, maybe every 10 steps?)
+             if step % 4 == 0:
+                 net_path = self.output_dir / f"trade_net_{step:04d}.png"
+                 self.net_viz.create_trade_network(self.nations, self.economy.trade_volumes, net_path)
         
         # i. Arms race
         self._process_arms_race()
@@ -339,6 +481,15 @@ class World:
         # Migration
         self._process_migration()
         
+        # Calculate Gini coefficient for this step
+        living_nations = [n for n in self.nations if n.population > 0]
+        gini = 0.0
+        if len(living_nations) > 1:
+            gdp_per_capitas = sorted([n.get_gdp_per_capita() for n in living_nations])
+            n = len(gdp_per_capitas)
+            if sum(gdp_per_capitas) > 0:
+                gini = (2 * sum((i+1) * gdp for i, gdp in enumerate(gdp_per_capitas))) / (n * sum(gdp_per_capitas)) - (n + 1) / n
+        
         return {
             "step": step,
             "events": events,
@@ -348,7 +499,8 @@ class World:
                 "global_population": sum(n.population for n in self.nations if n.population > 0),
                 "climate_index": self.climate_index,
                 "nuclear_detonations": self.combat.nuclear_detonations,
-                "global_trade_volume": self.economy.get_global_trade_volume()
+                "global_trade_volume": self.economy.get_global_trade_volume(),
+                "gini_coefficient": gini  # Track inequality over time
             },
             "nations": [n.to_dict() for n in self.nations if n.population > 0],
             "active_wars": [war.copy() for war in self.combat.active_wars]
@@ -456,7 +608,12 @@ class World:
                 
             # 3. Disasters
             if random.random() < 0.01 * temperature_rise:
-                self.events.events.append(f"CLIMATE: Extreme weather hits {nation.name}")
+                self.events.event_log.append({
+                    "step": self.step,
+                    "type": "climate_disaster",
+                    "nation": nation.name,
+                    "message": f"CLIMATE: Extreme weather hits {nation.name}"
+                })
                 nation.gdp *= 0.98
                 nation.population *= 0.995
     
@@ -702,7 +859,8 @@ class World:
     
     def generate_map(self, step: int):
         """Generate world map visualization."""
-        self.visualizer.create_world_map(self.nations, step, self.climate_index, self.hex_grid)
+        map_path = self.output_dir / f"world_map_{step:04d}.png"
+        self.visualizer.create_world_map(self.hex_grid, self.nations, map_path, self.combat.active_wars)
     
     def generate_final_report(self):
         """Generate comprehensive end-of-simulation report."""

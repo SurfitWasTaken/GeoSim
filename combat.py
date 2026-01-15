@@ -4,7 +4,12 @@ Models warfare with realistic factors: tech, logistics, nuclear weapons, and war
 """
 
 from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass
 import random
+import math
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np
 
 from nation import Nation
@@ -110,22 +115,71 @@ class WarSystem:
         attacker = nations[attacker_id]
         defender = nations[defender_id]
         
-        attacker.is_at_war = True
-        defender.is_at_war = True
-        
         war = {
             "attacker_id": attacker_id,
             "defender_id": defender_id,
-            "attacker_allies": list(attacker.alliances),
-            "defender_allies": list(defender.alliances),
             "cause": cause,
             "duration": 0,
-            "intensity": random.uniform(0.5, 1.0)
+            "attacker_initial_power": attacker.get_total_military_power(),
+            "defender_initial_power": defender.get_total_military_power(),
+            "attacker_initial_gdp": attacker.gdp,
+            "defender_initial_gdp": defender.gdp,
+            "defender_allies": [],
+            "attacker_allies": [],
+            "intensity": random.uniform(0.5, 1.0)  # War intensity for Lanchester equations
         }
-        
         self.active_wars.append(war)
         
-        return f"WAR: {attacker.name} attacks {defender.name} over {cause}"
+        attacker.is_at_war = True
+        defender.is_at_war = True
+        
+        logger.warning(f"WAR: {attacker.name} attacks {defender.name} ({cause})")
+        return f"WAR DECLARED: {attacker.name} vs {defender.name} - {cause}"
+    
+    def check_war_termination(self, war: Dict, nations_dict: Dict) -> Optional[str]:
+        """Check if war should end based on dynamic conditions."""
+        attacker = nations_dict.get(war["attacker_id"])
+        defender = nations_dict.get(war["defender_id"])
+        
+        if not attacker or not defender:
+            return "invalid_participants"
+        
+        # Condition 1: Military Annihilation (80% losses)
+        attacker_power = attacker.get_total_military_power()
+        defender_power = defender.get_total_military_power()
+        
+        if defender_power < war.get("defender_initial_power", 100) * 0.2:
+            return "attacker_victory_annihilation"
+        if attacker_power < war.get("attacker_initial_power", 100) * 0.2:
+            return "defender_victory_repelled"
+        
+        # Condition 2: Economic Collapse (GDP < 30% of pre-war)
+        if defender.gdp < war.get("defender_initial_gdp", defender.gdp) * 0.3:
+            return "attacker_victory_collapse"
+        
+        # Condition 3: Mutual Exhaustion Armistice
+        if attacker.war_exhaustion > 75 and defender.war_exhaustion > 75:
+            # Check if anyone has clear advantage
+            power_ratio = attacker_power / max(1, defender_power)
+            if 0.7 < power_ratio < 1.3:  # Roughly equal
+                return "stalemate_armistice"
+        
+        # Condition 4: Attacker Withdrawal (domestic pressure)
+        if attacker.war_exhaustion > 80:
+            # Democracies fold easier
+            if attacker.government_type == "Democracy":
+                if random.random() < 0.3:
+                    return "defender_victory_withdrawal"
+            elif random.random() < 0.1:  # Autocracies more stubborn
+                return "defender_victory_withdrawal"
+        
+        # Condition 5: Negotiated Peace (stability collapse)
+        if attacker.stability < 30 or defender.stability < 30:
+            if war["duration"] > 12:  # After 1 year
+                if random.random() < 0.2:
+                    return "negotiated_peace"
+        
+        return None  # War continues
     
     def resolve_wars(self, nations: List[Nation]) -> List[str]:
         """Resolve all active wars using combat resolution."""
@@ -137,6 +191,33 @@ class WarSystem:
             
             attacker = nations_dict.get(war["attacker_id"])
             defender = nations_dict.get(war["defender_id"])
+            
+            # Implement chokepoint blockades during war
+            if attacker and defender:
+                if hasattr(self, 'hex_grid') and self.hex_grid:
+                    for chokepoint, controller_id in list(self.hex_grid.chokepoint_control.items()):
+                        # If defender controls chokepoint, attacker tries to blockade
+                        if controller_id == defender.id and attacker.military_power.get("navy", 0) > 20:
+                            self.hex_grid.blockaded_chokepoints.add(chokepoint)
+                        # If attacker controls chokepoint, defender tries to blockade
+                        elif controller_id == attacker.id and defender.military_power.get("navy", 0) > 20:
+                            self.hex_grid.blockaded_chokepoints.add(chokepoint)
+            
+            # Check for dynamic war termination BEFORE combat
+            termination_reason = self.check_war_termination(war, nations_dict)
+            if termination_reason:
+                # War ends
+                self.active_wars.remove(war)
+                if attacker:
+                    attacker.is_at_war = False
+                    attacker.war_exhaustion *= 0.8  # Reduce exhaustion
+                if defender:
+                    defender.is_at_war = False
+                    defender.war_exhaustion *= 0.8
+                
+                events.append(f"WAR ENDED: {attacker.name if attacker else 'Unknown'} vs {defender.name if defender else 'Unknown'} - {termination_reason}")
+                logger.info(f"War terminated: {termination_reason}")
+                continue  # Skip to next war
             
             # Check if either side is eliminated or doesn't exist
             if not attacker or not defender or attacker.population == 0 or defender.population == 0:

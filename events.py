@@ -18,6 +18,12 @@ class EventSystem:
         self.config = config
         self.active_pandemics: List[Dict] = []
         self.event_log: List[Dict] = []
+        
+        # Decolonization wave tracking
+        self.recent_independence_events: List[Tuple[int, int, int]] = []  # (step, colonizer_id, colony_id)
+        
+        # Oil embargo tracking
+        self.active_embargoes: List[Dict] = []  # {start_step, initiator_id, duration, severity}
     
     def process_events(self, nations: List[Nation], economy, step: int, hex_grid=None) -> List[str]:
         """Process all random events for the turn."""
@@ -30,6 +36,48 @@ class EventSystem:
         self._update_pandemics(nations, economy, self.events, hex_grid)
         
         return self.events
+    
+    def check_oil_embargo(self, nations: List[Nation], wars: List[Dict], step: int) -> Optional[str]:
+        """Check if active wars trigger oil embargoes (supply shocks)."""
+        nations_dict = {n.id: n for n in nations}
+        
+        for war in wars:
+            attacker_id = war.get("attacker_id")
+            defender_id = war.get("defender_id")
+            
+            attacker = nations_dict.get(attacker_id)
+            defender = nations_dict.get(defender_id)
+            
+            if not attacker or not defender:
+                continue
+            
+            # Check if either side is a major oil producer
+            attacker_oil = attacker.resources.get("oil", 0)
+            defender_oil = defender.resources.get("oil", 0)
+            
+            # Major oil producer = oil > 50
+            if attacker_oil > 50 or defender_oil > 50:
+                # 30% chance per step that embargo triggers
+                if random.random() < 0.3:
+                    initiator = defender if defender_oil > 50 else attacker
+                    
+                    # Check if embargo already active from this initiator
+                    already_active = any(e["initiator_id"] == initiator.id 
+                                        for e in self.active_embargoes)
+                    
+                    if not already_active:
+                        embargo = {
+                            "start_step": step,
+                            "initiator_id": initiator.id,
+                            "initiator_name": initiator.name,
+                            "duration": random.randint(6, 12),  # 6-12 months
+                            "severity": random.uniform(0.3, 0.5)  # 30-50% impact
+                        }
+                        self.active_embargoes.append(embargo)
+                        logger.warning(f"OIL EMBARGO: {initiator.name} restricts oil exports (severity {embargo['severity']:.0%})")
+                        return f"OIL EMBARGO: {initiator.name} cuts oil supply to hostile nations"
+        
+        return None
     
     def _check_new_events(self, nations: List[Nation], step: int):
         """Checks for and triggers new, non-pandemic events."""

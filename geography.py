@@ -1,6 +1,7 @@
 import numpy as np
 from enum import Enum, auto
 from typing import List, Tuple, Dict, Optional, Set
+from dataclasses import dataclass
 import heapq
 import math
 
@@ -10,16 +11,31 @@ class TerrainType(Enum):
     MOUNTAIN = auto()
     DESERT = auto()
     FOREST = auto()
+    STRAIT = auto()   # Strategic narrow water passage
+    CANAL = auto()    # Man-made waterway (built by high-tech nations)
+
+@dataclass
+class HexCell:
+    x: int
+    y: int
+    terrain: TerrainType
+    owner_id: Optional[int] = None
+    resource_type: str = "none"
+    is_capital: bool = False
+    population: int = 0
+    infrastructure: float = 0.0
 
 class HexGrid:
     """
-    Hexagonal grid system using offset coordinates (odd-q vertical layout).
-    Handles adjacency, distance, and pathfinding on a torus (wrapped world).
+    Hexagonal grid system using offset coordinates (odd-q).
     """
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
         self.terrain = np.full((height, width), TerrainType.OCEAN, dtype=object)
+        
+        # New: Object-based storage for rich data
+        self.cells: Dict[Tuple[int, int], HexCell] = {}
         
         # Movement costs
         self.costs = {
@@ -27,8 +43,15 @@ class HexGrid:
             TerrainType.PLAINS: 1.0,
             TerrainType.FOREST: 1.5,
             TerrainType.DESERT: 2.0,
-            TerrainType.MOUNTAIN: 3.0
+            TerrainType.MOUNTAIN: 3.0,
+            TerrainType.STRAIT: 1.0,  # Water passage
+            TerrainType.CANAL: 0.8    # Efficient passage if controlled
         }
+        
+        # Strategic chokepoints (straits/canals)
+        self.chokepoints: List[Tuple[int, int]] = []
+        self.chokepoint_control: Dict[Tuple[int, int], Optional[int]] = {}
+        self.blockaded_chokepoints: Set[Tuple[int, int]] = set()
 
     def get_neighbors(self, x: int, y: int) -> List[Tuple[int, int]]:
         """Get 6 neighbors in hex grid with toroidal wrapping."""
@@ -143,3 +166,36 @@ class HexGrid:
                         self.terrain[y, x] = TerrainType.FOREST
                     elif r < 0.25:
                         self.terrain[y, x] = TerrainType.DESERT
+        
+        # Generate strategic straits (chokepoints)
+        # Find narrow ocean passages between land masses
+        self._generate_straits()
+    
+    def _generate_straits(self):
+        """Identify and mark strategic strait chokepoints."""
+        # Strategy: Find ocean tiles that connect two large ocean regions
+        # and are adjacent to land on both sides (narrow passages)
+        
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.terrain[y, x] == TerrainType.OCEAN:
+                    neighbors = self.get_neighbors(x, y)
+                    
+                    # Count land vs ocean neighbors
+                    land_neighbors = sum(1 for nx, ny in neighbors 
+                                        if self.terrain[ny, nx] not in [TerrainType.OCEAN, TerrainType.STRAIT])
+                    ocean_neighbors = sum(1 for nx, ny in neighbors 
+                                         if self.terrain[ny, nx] == TerrainType.OCEAN)
+                    
+                    # Strait criteria: 2-4 land neighbors (narrow passage)
+                    if 2 <= land_neighbors <= 4 and ocean_neighbors >= 2:
+                        # Random chance to make it a strategic strait
+                        if np.random.random() < 0.3:
+                            self.terrain[y, x] = TerrainType.STRAIT
+                            self.chokepoints.append((x, y))
+                            self.chokepoint_control[(x, y)] = None  # Initially uncontrolled
+
+        # Populate cell objects
+        for y in range(self.height):
+            for x in range(self.width):
+                self.cells[(y, x)] = HexCell(x, y, self.terrain[y, x])

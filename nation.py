@@ -3,12 +3,15 @@ Configuration and constants for realistic geopolitical simulation.
 Parameters calibrated to empirical data and established economic models.
 """
 
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Set, Tuple, Optional, Tuple, Optional
 import random
 import numpy as np
 
 # use canonical shared config/constants to avoid duplication / circular imports
 from config import SimulationConfig, GOVERNMENT_TYPES, NATION_NAME_PARTS
+# Setup logger
+from logger import setup_logger
+logger = setup_logger()
 
 
 class Currency:
@@ -115,11 +118,30 @@ class Nation:
         self.fdi_positions: Dict[int, float] = {}  # Bilateral FDI stocks {target_id: amount}
         self.debt_to_gdp: float = 0.0
         self.inflation_rate: float = 0.02
+        self.hyperinflation_active: bool = False  # Track fiscal dominance state
+        
+        # Within-nation inequality
+        self.income_distribution = {"labor": 0.65, "capital": 0.35}  # Labor vs capital shares
+        self.domestic_gini = 0.35  # Initial within-nation inequality
+        
+        # Tech breakthrough tracking
+        self.tech_breakthroughs = set()  # Track which thresholds passed
+        
+        # Diplomacy
+        self.alliances: Set[int] = set()
+        self.rivals: Set[int] = set()  # Strategic rivals (for alliance logic)
+        self.sanctions_active: Set[int] = set() # Nations we are sanctioning
+        self.sanctions_from: Set[int] = set()   # Nations sanctioning us
+        self.colonial_subjects: Set[int] = set()
+        self.colonial_influence: float = 0.0
+
         self.is_at_war: bool = False
         self.war_exhaustion: float = 0.0
 
         self.territory_tiles: List[Tuple[int, int]] = []
+        self.capital_loc: Optional[Tuple[int, int]] = None
         self.is_coastal: bool = True  # Default to true, updated by world gen
+        self.in_default: bool = False
         self.resources: Dict[str, float] = {}
         
         # Demographics
@@ -234,6 +256,26 @@ class Nation:
         if self.currency.regime == "pegged":
             return
 
+        # Check for Hyperinflation / Fiscal Dominance
+        # Trigger: High debt (>150% GDP) AND low stability (<30) → money printing spiral
+        if self.debt_to_gdp > 1.5 and self.stability < 30:
+            if not self.hyperinflation_active:
+                self.hyperinflation_active = True
+                logger.warning(f"HYPERINFLATION: Fiscal dominance triggered in {self.name}")
+            
+            # Money printing spiral (Cagan money demand model)
+            self.inflation_rate += 0.1  # 10 percentage points per step
+            self.currency.exchange_rate *= 0.85  # Currency collapse
+            self.stability -= 2  # Vicious cycle
+            
+            # Stabilization possible if debt reduced or stability restored
+            if self.debt_to_gdp < 1.0 or self.stability > 50:
+                self.hyperinflation_active = False
+                logger.info(f"Hyperinflation stabilization in {self.name}")
+            
+            return  # Skip Taylor Rule during hyperinflation
+        
+        # Normal monetary policy: Taylor Rule
         # Target inflation
         pi_star = config.base_inflation_target
         
@@ -287,15 +329,50 @@ class Nation:
             self.age_distribution[key] /= total
             self.age_distribution[key] = max(0.0, self.age_distribution[key])
 
-    def invest_rd(self, rd_fraction: float, config) -> None:
-        """
-        Invest a fraction of GDP into R&D -> increases technology.
-        rd_fraction is fraction of GDP (e.g. 0.03 for 3%).
-        """
-        rd_spend = rd_fraction * self.gdp
-        tech_gain = (rd_spend / max(1.0, self.gdp)) * config.tech_rd_efficiency * 100.0
+    def invest_rd(self, rd_spending_fraction: float, config):
+        """Invest in R&D to increase technology."""
+        rd_spending = self.gdp * rd_spending_fraction
+        
         # Diminishing returns
-        self.technology = min(100.0, self.technology + tech_gain)
+        base_gain = (rd_spending / 1e11) * (100 - self.technology) / 100
+        
+        # Knowledge spillover from trade/FDI
+        spillover = (self.fdi_inflows / max(1, self.gdp)) * config.tech_spillover_rate * 0.1
+        
+        tech_gain = base_gain + spillover
+        
+        # Store old tech for breakthrough detection
+        old_tech = self.technology
+        self.technology = min(100, self.technology + tech_gain)
+        
+        # Tech-Specific Breakthroughs (discrete jumps at thresholds)
+        # Nuclear Power (tech 80)
+        if old_tech < 80 <= self.technology and 80 not in self.tech_breakthroughs:
+            self.tech_breakthroughs.add(80)
+            self.gdp *= 1.05  # Nuclear power efficiency boost
+            logger.info(f"BREAKTHROUGH: {self.name} achieves nuclear power (+5% GDP)")
+        
+        # Space Capability (tech 85)
+        if old_tech < 85 <= self.technology and 85 not in self.tech_breakthroughs:
+            self.tech_breakthroughs.add(85)
+            # Satellite intelligence boost to military
+            for branch in self.military_power:
+                if branch != "nuclear":
+                    self.military_power[branch] *= 1.10
+            logger.info(f"BREAKTHROUGH: {self.name} reaches space capability (+10% military effectiveness)")
+        
+        # AI/Automation (tech 90)
+        if old_tech < 90 <= self.technology and 90 not in self.tech_breakthroughs:
+            self.tech_breakthroughs.add(90)
+            self.gdp *= 1.08  # Automation productivity gains
+            self.domestic_gini += 0.05  # Automation increases inequality
+            logger.info(f"BREAKTHROUGH: {self.name} develops advanced AI (+8% GDP, +0.05 Gini)")
+        
+        # Quantum Computing (tech 95)
+        if old_tech < 95 <= self.technology and 95 not in self.tech_breakthroughs:
+            self.tech_breakthroughs.add(95)
+            # Quantum spillover handled in world.py (boost allies)
+            logger.info(f"BREAKTHROUGH: {self.name} achieves quantum computing")
 
     def build_military(self, spending_fraction: float, config) -> None:
         """
@@ -309,6 +386,25 @@ class Nation:
         self.military_power["army"] = self.military_power.get("army", 0) + power_units * 0.5
         self.military_power["navy"] = self.military_power.get("navy", 0) + power_units * 0.25
         self.military_power["air"] = self.military_power.get("air", 0) + power_units * 0.25
+        # nuclear not cheaply built here
+    
+    def update_inequality(self):
+        """Update within-nation inequality based on tech level, FDI, and economic structure."""
+        # Tech increases capital share (automation)
+        if self.technology > 70:
+            tech_effect = (self.technology - 70) * 0.003  # +0.09 at tech=100
+            self.income_distribution["capital"] = min(0.50, 0.35 + tech_effect)
+        
+        # FDI increases capital returns
+        if self.fdi_inflows > self.gdp * 0.05:  # FDI > 5% of GDP
+            self.income_distribution["capital"] = min(0.50, self.income_distribution["capital"] + 0.01)
+        
+        # Ensure shares sum to 1
+        self.income_distribution["labor"] = 1 - self.income_distribution["capital"]
+        
+        # Calculate domestic Gini (simplified: higher capital share = higher inequality)
+        capital_share = self.income_distribution["capital"]
+        self.domestic_gini = 0.3 + (capital_share - 0.35) * 2  # Gini rises with capital share.get("air", 0) + power_units * 0.25
         # nuclear not cheaply built here
 
     def update_health(self, config) -> None:
