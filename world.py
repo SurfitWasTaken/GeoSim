@@ -434,7 +434,7 @@ class World:
             events.append(embargo_event)
         
         # 6. Visualization (Enhanced)
-        if step % 2 == 0:  # Map every 2 steps
+        if not self.config.disable_viz and step % 2 == 0:  # Map every 2 steps
              map_path = self.output_dir / f"world_map_{step:04d}.png"
              self.viz.create_world_map(self.hex_grid, self.nations, map_path, self.combat.active_wars)
              
@@ -825,7 +825,21 @@ class World:
                 if destinations:
                     destinations.sort(key=lambda x: x[1], reverse=True)
                     dest = destinations[0][0]
-                    dest.population += emigrants * 0.7  # Some lost in transit
+                    actual_migrants = emigrants * 0.7  # Some lost in transit
+                    dest.population += actual_migrants
+                    
+                    # Cultural integration mechanics
+                    ideology_diff = abs(nation.ideology - dest.ideology)
+                    migrant_ratio = actual_migrants / max(1.0, dest.population)
+                    
+                    # Cultural friction impacts stability if ideology diff is high and volume is high
+                    friction = (ideology_diff / 50.0) * (migrant_ratio * 100)
+                    if friction > 0.1:
+                        dest.stability -= min(10.0, friction * 5)
+                        
+                        # Gradual ideological shift towards migrant ideology
+                        shift_weight = min(0.05, migrant_ratio * (1 - dest.stability/100.0))
+                        dest.ideology = dest.ideology * (1 - shift_weight) + nation.ideology * shift_weight
     
     def print_summary(self, step: int):
         """Print periodic summary table."""

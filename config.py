@@ -17,6 +17,7 @@ class SimulationConfig:
     realism_level: Literal["low", "medium", "high"]
     enable_gold_standard: bool
     output_dir: Path
+    disable_viz: bool = False
     
     # World geography (hex-grid on torus)
     world_width: int = 100

@@ -52,6 +52,10 @@ class HexGrid:
         self.chokepoints: List[Tuple[int, int]] = []
         self.chokepoint_control: Dict[Tuple[int, int], Optional[int]] = {}
         self.blockaded_chokepoints: Set[Tuple[int, int]] = set()
+        self.path_cache: Dict[Tuple[Tuple[int, int], Tuple[int, int], bool], Optional[List[Tuple[int, int]]]] = {}
+
+    def invalidate_cache(self):
+        self.path_cache.clear()
 
     def get_neighbors(self, x: int, y: int) -> List[Tuple[int, int]]:
         """Get 6 neighbors in hex grid with toroidal wrapping."""
@@ -91,6 +95,10 @@ class HexGrid:
     def find_path(self, start: Tuple[int, int], end: Tuple[int, int], 
                  naval_capable: bool = True) -> Optional[List[Tuple[int, int]]]:
         """A* pathfinding."""
+        cache_key = (start, end, naval_capable)
+        if cache_key in self.path_cache:
+            return self.path_cache[cache_key]
+
         def heuristic(a, b):
             return self.distance(a[0], a[1], b[0], b[1])
 
@@ -111,6 +119,9 @@ class HexGrid:
                 # Impassable check
                 if not naval_capable and terrain == TerrainType.OCEAN:
                     continue
+                if next_node in self.blockaded_chokepoints:
+                    continue
+
                 
                 new_cost = cost_so_far[current] + self.costs.get(terrain, 1.0)
                 
@@ -121,6 +132,7 @@ class HexGrid:
                     came_from[next_node] = current
                     
         if end not in came_from:
+            self.path_cache[cache_key] = None
             return None
             
         # Reconstruct path
@@ -131,6 +143,7 @@ class HexGrid:
             curr = came_from[curr]
         path.append(start)
         path.reverse()
+        self.path_cache[cache_key] = path
         return path
 
     def generate_terrain(self, seed: int = None):

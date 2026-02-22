@@ -6,6 +6,7 @@ Parameters calibrated to empirical data and established economic models.
 from typing import Dict, List, Set, Tuple, Optional, Tuple, Optional
 import random
 import numpy as np
+import math
 
 # use canonical shared config/constants to avoid duplication / circular imports
 from config import SimulationConfig, GOVERNMENT_TYPES, NATION_NAME_PARTS
@@ -261,14 +262,34 @@ class Nation:
         if self.debt_to_gdp > 1.5 and self.stability < 30:
             if not self.hyperinflation_active:
                 self.hyperinflation_active = True
-                logger.warning(f"HYPERINFLATION: Fiscal dominance triggered in {self.name}")
+                logger.warning(f"HYPERINFLATION: Fiscal dominance triggered in {self.name} - Printing money to cover deficit")
             
-            # Money printing spiral (Cagan money demand model)
-            self.inflation_rate += 0.1  # 10 percentage points per step
-            self.currency.exchange_rate *= 0.85  # Currency collapse
-            self.stability -= 2  # Vicious cycle
+            # Cagan Model of Money Demand and Seigniorage
+            # Real money demand drops exponentially as inflation rises
+            alpha = 5.0  # Sensitivity to inflation expectations
+            real_money_demand = max(0.01, math.exp(-alpha * self.inflation_rate))
             
-            # Stabilization possible if debt reduced or stability restored
+            # Government must print money to cover fiscal deficit (assumed ~10% GDP)
+            monetized_deficit_ratio = 0.10
+            
+            # Required money growth = Deficit / Real Money Demand 
+            # Velocity increases as demand drops, accelerating inflation
+            money_growth = monetized_deficit_ratio / real_money_demand
+            
+            # Inflation driven by money supply growth
+            new_inflation = self.inflation_rate + money_growth * 0.5  # Partial adjustment per step
+            
+            # Cap hyperinflation to prevent math overflows in simulation (e.g., 10,000% max effect per step)
+            self.inflation_rate = min(100.0, new_inflation)
+            
+            # Currency collapses inversely to inflation
+            depreciation = max(0.01, math.exp(-self.inflation_rate * 0.1))
+            self.currency.exchange_rate *= depreciation
+            
+            # Vicious cycle accelerates instability
+            self.stability -= 3.0
+            
+            # Stabilization possible if debt drastically reduced by inflation-tax or stability forced up
             if self.debt_to_gdp < 1.0 or self.stability > 50:
                 self.hyperinflation_active = False
                 logger.info(f"Hyperinflation stabilization in {self.name}")
@@ -404,8 +425,7 @@ class Nation:
         
         # Calculate domestic Gini (simplified: higher capital share = higher inequality)
         capital_share = self.income_distribution["capital"]
-        self.domestic_gini = 0.3 + (capital_share - 0.35) * 2  # Gini rises with capital share.get("air", 0) + power_units * 0.25
-        # nuclear not cheaply built here
+        self.domestic_gini = 0.3 + (capital_share - 0.35) * 2  # Gini rises with capital share.
 
     def update_health(self, config) -> None:
         """Update health index slowly based on GDP per capita and tech."""

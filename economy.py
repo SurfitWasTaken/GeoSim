@@ -68,9 +68,9 @@ class GlobalEconomy:
                     continue
                 
                 # Calculate distance using territory centroids
-                # If nations have no territory (shouldn't happen if pop > 0), use default
                 if not nation_a.territory_tiles or not nation_b.territory_tiles:
                     distance = 50.0
+                    route_blocked = False
                 else:
                     # Calculate centroids
                     cx_a = sum(t[0] for t in nation_a.territory_tiles) / len(nation_a.territory_tiles)
@@ -79,36 +79,27 @@ class GlobalEconomy:
                     cx_b = sum(t[0] for t in nation_b.territory_tiles) / len(nation_b.territory_tiles)
                     cy_b = sum(t[1] for t in nation_b.territory_tiles) / len(nation_b.territory_tiles)
                     
-                    # Toroidal distance
+                    # Toroidal distance or A* pathfinding
                     if hex_grid:
-                        # Use HexGrid distance (approximate centroid)
-                        distance = hex_grid.distance(int(cx_a), int(cy_a), int(cx_b), int(cy_b))
+                        start_node = (int(cx_a), int(cy_a))
+                        end_node = (int(cx_b), int(cy_b))
+                        path = hex_grid.find_path(start_node, end_node)
+                        
+                        route_blocked = False
+                        if not path:
+                            route_blocked = True
+                            distance = 999.0
+                        else:
+                            # Calculate path cost based on length
+                            distance = float(len(path))
                     else:
                         w, h = self.config.world_width, self.config.world_height
                         dx = min(abs(cx_a - cx_b), w - abs(cx_a - cx_b))
                         dy = min(abs(cy_a - cy_b), h - abs(cy_a - cy_b))
                         distance = (dx**2 + dy**2) ** 0.5
+                        route_blocked = False
                     
                     distance = max(1.0, distance) # Avoid zero division
-                
-                # Chokepoint blockade check (NEW)
-                route_blocked = False
-                if hex_grid and hex_grid.chokepoints:
-                    # Simple heuristic: if route is long-distance (>30 tiles), check for blockaded chokepoints
-                    if distance > 30:
-                        for chokepoint in hex_grid.chokepoints:
-                            if chokepoint in hex_grid.blockaded_chokepoints:
-                                # Check if this chokepoint might affect the route
-                                # (between the two nations' centroids)
-                                choke_x, choke_y = chokepoint
-                                # If chokepoint is roughly between the two nations, route is blocked
-                                dist_a_choke = hex_grid.distance(int(cx_a), int(cy_a), choke_x, choke_y)
-                                dist_b_choke = hex_grid.distance(int(cx_b), int(cy_b), choke_x, choke_y)
-                                
-                                # If chokepoint is along the path (sum of distances ≈ direct distance)
-                                if abs((dist_a_choke + dist_b_choke) - distance) < 10:
-                                    route_blocked = True
-                                    break
                 
                 if route_blocked:
                     # Trade volume drastically reduced by blockade
@@ -255,7 +246,7 @@ class GlobalEconomy:
                     
                     # Check for colonial subject status based on total stock vs GDP
                     total_stock = sum(n.fdi_positions.get(target.id, 0) for n in nations)
-                if total_stock > target.gdp * 0.5:
+                    if total_stock > target.gdp * 0.5:
                         # High dependency risk (simplified: if this investor is dominant)
                         if investor.fdi_positions[target.id] > total_stock * 0.5:
                             investor.colonial_subjects.add(target.id)

@@ -198,10 +198,14 @@ class WarSystem:
                     for chokepoint, controller_id in list(self.hex_grid.chokepoint_control.items()):
                         # If defender controls chokepoint, attacker tries to blockade
                         if controller_id == defender.id and attacker.military_power.get("navy", 0) > 20:
-                            self.hex_grid.blockaded_chokepoints.add(chokepoint)
+                            if chokepoint not in self.hex_grid.blockaded_chokepoints:
+                                self.hex_grid.blockaded_chokepoints.add(chokepoint)
+                                self.hex_grid.invalidate_cache()
                         # If attacker controls chokepoint, defender tries to blockade
                         elif controller_id == attacker.id and defender.military_power.get("navy", 0) > 20:
-                            self.hex_grid.blockaded_chokepoints.add(chokepoint)
+                            if chokepoint not in self.hex_grid.blockaded_chokepoints:
+                                self.hex_grid.blockaded_chokepoints.add(chokepoint)
+                                self.hex_grid.invalidate_cache()
             
             # Check for dynamic war termination BEFORE combat
             termination_reason = self.check_war_termination(war, nations_dict)

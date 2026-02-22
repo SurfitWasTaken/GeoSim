@@ -27,7 +27,8 @@ def test_config():
             num_steps=50,
             realism_level="high",
             enable_gold_standard=True,
-            output_dir=Path(tmpdir)
+            output_dir=Path(tmpdir),
+            disable_viz=True
         )
 
 
@@ -368,7 +369,8 @@ def test_reproducibility():
             num_steps=10,
             realism_level="high",
             enable_gold_standard=False,
-            output_dir=Path(tmpdir)
+            output_dir=Path(tmpdir),
+            disable_viz=True
         )
         
         config2 = SimulationConfig(
@@ -376,7 +378,8 @@ def test_reproducibility():
             num_steps=10,
             realism_level="high",
             enable_gold_standard=False,
-            output_dir=Path(tmpdir)
+            output_dir=Path(tmpdir),
+            disable_viz=True
         )
         
         # Run 1
