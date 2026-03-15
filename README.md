@@ -88,15 +88,14 @@ End-of-simulation report includes:
 ### Module Structure
 
 ```
-├── main.py              # Entry point and CLI
-├── config.py            # Global parameters and constants
-├── nation.py            # Nation model with attributes and behaviors
-├── economy.py           # Global economic systems (trade, FDI, institutions)
-├── events.py            # Random events (elections, disasters, pandemics)
-├── combat.py            # Warfare resolution (Lanchester equations)
-├── world.py             # World orchestration and turn mechanics
-├── viz.py               # Matplotlib visualizations
-└── test_simulation.py   # Pytest test suite
+├── geosim/              # Main package
+│   ├── core/            # Core simulation logic (world, nation, economy, combat, etc.)
+│   ├── utils/           # Utilities and configuration (config, logger)
+│   ├── visualization/   # Visualization and UI tools (viz, network_viz)
+│   └── interfaces/      # Frontends and reporting (app, dashboard, reporting, demo)
+├── tests/               # Pytest test suite
+├── docs/                # Documentation and whitepapers
+└── main.py              # Entry point and CLI
 ```
 
 ### Economic Models
@@ -137,7 +136,7 @@ Casualties_B = Strength_A² × intensity × tech_ratio × logistics_ratio
 Run the test suite:
 
 ```bash
-pytest test_simulation.py -v
+pytest tests/ -v
 ```
 
 Tests include:
@@ -217,7 +216,7 @@ python main.py --nations 20 --steps 100 --seed 42
 python main.py --nations 50 --steps 500 --seed 42
 
 # 5. Run tests
-pytest test_simulation.py -v
+pytest tests/ -v
 ```
 
 ## Example Output

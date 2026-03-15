@@ -18,10 +18,10 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 
-from world import World
-from config import SimulationConfig
-from logger import setup_logger
-from reporting import ReportGenerator
+from geosim.core.world import World
+from geosim.utils.config import SimulationConfig
+from geosim.utils.logger import setup_logger
+from geosim.interfaces.reporting import ReportGenerator
 
 logger = None
 console = Console()
