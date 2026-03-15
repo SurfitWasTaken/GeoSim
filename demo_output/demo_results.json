@@ -5,26 +5,26 @@
     "realism_level": "high"
   },
   "performance": {
-    "total_time": 127.29265522956848,
-    "time_per_step": 2.5458531045913695
+    "total_time": 124.8368730545044,
+    "time_per_step": 2.496737461090088
   },
   "final_stats": {
-    "living_nations": 17,
-    "global_gdp": 1682295109277.8457,
-    "global_population": 149664192.22128946,
-    "climate_index": 0.13181024276916747,
+    "living_nations": 18,
+    "global_gdp": 1785126272810.7898,
+    "global_population": 155425678.6355528,
+    "climate_index": 0.10502649788326635,
     "nuclear_detonations": 0,
-    "global_trade_volume": 562247081264.8622,
-    "gini_coefficient": 0.3127236348548832
+    "global_trade_volume": 0,
+    "gini_coefficient": 0.3290345405923798
   },
   "verification": {
-    "max_alliances": 2,
-    "carbon_budget_pct": 8.787349517944499,
-    "colonial_nations": 2,
+    "max_alliances": 1,
+    "carbon_budget_pct": 7.00176652555109,
+    "colonial_nations": 4,
     "currency_regimes": {
       "gold": 0,
-      "pegged": 1,
-      "floating": 16
+      "pegged": 0,
+      "floating": 18
     },
     "dead_nations_at_war": 0
   }

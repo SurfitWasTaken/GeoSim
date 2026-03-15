@@ -55,6 +55,14 @@ class GlobalEconomy:
         self.trade_agreements = []
         self.trade_volumes = {}
         
+        # Bug 9: Trade volume is a flow variable (measured per tick), but the simulation previously
+        # left it accumulating indefinitely as a state variable. We must reset balances before re-calculating
+        # this step's trade, otherwise dead nations will leak global trade money from the aggregate math.
+        global_gdp = sum(n.gdp for n in nations if n.population > 0)
+        
+        for nation in nations:
+            nation.trade_balance = 0.0
+        
         for i, nation_a in enumerate(nations):
             if not nation_a.population > 0:
                 continue
@@ -106,7 +114,9 @@ class GlobalEconomy:
                     continue  # Skip this trade route entirely
                 
                 # Gravity model
-                gravity = (nation_a.gdp * nation_b.gdp) / (distance ** 2)
+                # Bug 9: Normalize the gravity model against global GDP instead of a flat 1e-10 constant
+                # Otherwise, as global GDP grows, trade grows exponentially faster, creating massive instability
+                gravity = (nation_a.gdp * nation_b.gdp) / (distance ** 2) / max(1.0, global_gdp)
                 
                 # Geography Modifiers
                 geo_penalty = 1.0
@@ -126,7 +136,7 @@ class GlobalEconomy:
                 alliance_bonus = 1.2 if nation_a.id in nation_b.alliances else 1.0
                 
                 # Calculate trade volume
-                trade_volume = gravity * (1 + advantage) * alliance_bonus * geo_penalty * 1e-10
+                trade_volume = gravity * (1 + advantage) * alliance_bonus * geo_penalty * 0.1 # 10% base trade parameter
                 
                 if trade_volume > nation_a.gdp * 0.01:  # Meaningful trade threshold
                     self.trade_agreements.append((nation_a.id, nation_b.id))

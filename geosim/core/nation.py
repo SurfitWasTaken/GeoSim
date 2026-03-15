@@ -369,9 +369,12 @@ class Nation:
             dampening = 1.0 - min(0.8, (oil_share - 0.05) * 2.5)  # Penalise tech growth heavily
             tech_gain *= max(0.2, dampening)
         
-        # Store old tech for breakthrough detection
+        # Bug 7: Tech Ceiling fixed - asymptotic frontier limits instead of max(100)
         old_tech = self.technology
-        self.technology = min(100, self.technology + tech_gain)
+        if self.technology < 100:
+            self.technology = self.technology + tech_gain
+        else:
+            self.technology = self.technology + (tech_gain * (100.0 / self.technology) * 0.1)
         
         # Tech-Specific Breakthroughs (discrete jumps at thresholds)
         # Nuclear Power (tech 80)
@@ -410,11 +413,19 @@ class Nation:
         spending = spending_fraction * self.gdp
         # convert spending into "power" loosely
         power_units = spending / (self.gdp * config.military_gdp_cost + 1e-12) * 0.001
-        # distribute
-        self.military_power["army"] = self.military_power.get("army", 0) + power_units * 0.5
-        self.military_power["navy"] = self.military_power.get("navy", 0) + power_units * 0.25
-        self.military_power["air"] = self.military_power.get("air", 0) + power_units * 0.25
-        # nuclear not cheaply built here
+        
+        # Bug 8: Reactivated Nuclear Program logic
+        nuclear_share = 0.0
+        if self.technology >= 80 and power_units > 10:
+            nuclear_share = 0.05  # Allocate 5% to nuclear stockpile
+            self.military_power["nuclear"] = self.military_power.get("nuclear", 0) + power_units * nuclear_share
+            
+        remaining_power = power_units * (1.0 - nuclear_share)
+        
+        # distribute remaining power
+        self.military_power["army"] = self.military_power.get("army", 0) + remaining_power * 0.5
+        self.military_power["navy"] = self.military_power.get("navy", 0) + remaining_power * 0.25
+        self.military_power["air"] = self.military_power.get("air", 0) + remaining_power * 0.25
     
     def update_inequality(self):
         """Update within-nation inequality based on tech level, FDI, and economic structure."""
@@ -439,8 +450,14 @@ class Nation:
         try:
             gdp_pc = self.get_gdp_per_capita()
             delta = (gdp_pc / 50000.0) * config.health_gdp_elasticity + (self.technology / 100.0) * config.health_tech_bonus
-            # small adjustment
-            self.health = float(max(config.health_min, min(config.health_max, self.health + (delta - 0.01))))
+            
+            # Bug 7: Health Ceiling fixed - asymptotic frontier limits instead of max(100)
+            target_health = self.health + (delta - 0.01)
+            if target_health <= 100:
+                self.health = float(max(config.health_min, target_health))
+            else:
+                extra = target_health - 100.0
+                self.health = float(100.0 + (extra * (100.0 / self.health) * 0.1))
         except Exception:
             pass
 
