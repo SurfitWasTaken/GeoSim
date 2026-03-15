@@ -55,12 +55,14 @@ python main.py \
 
 ### Command-Line Arguments
 
-- `--nations N`: Number of countries (default: 50)
-- `--steps T`: Simulation duration (default: 500)
+- `--nations N`: Number of sovereign countries (default: 50)
+- `--steps T`: Number of time steps to simulate (default: 500)
 - `--seed S`: Random seed for reproducibility
-- `--realism-level {low,medium,high}`: Parameter strictness
-- `--enable-gold-standard`: Allow nations to adopt gold standard
-- `--output-dir PATH`: Output directory (default: output/)
+- `--realism-level {low,medium,high}`: Realism parameter strictness (default: high)
+- `--enable-gold-standard`: Enable gold standard currency option
+- `--output-dir PATH`: Directory for output files (default: output)
+- `--log-level {DEBUG,INFO,WARNING,ERROR}`: Logging verbosity level (default: INFO)
+- `--no-viz`: Skip visualization generation for performance
 
 ## Output Files
 
@@ -188,29 +190,24 @@ Adjust realism parameters in `config.py`:
 
 ## File Structure
 
-All 11 files required for the simulation:
+The project has been refactored into a scalable modular package:
 
-1. **main.py** - Entry point with CLI argument parsing
-2. **config.py** - Configuration constants and parameters
-3. **nation.py** - Nation class with economic/military/political systems
-4. **economy.py** - Global trade, FDI, currency markets, institutions
-5. **events.py** - Random events (elections, disasters, pandemics, etc.)
-6. **combat.py** - Warfare system with Lanchester equations
-7. **world.py** - World orchestration and turn-by-turn simulation
-8. **viz.py** - Matplotlib visualization generation
-9. **test_simulation.py** - Pytest test suite
-10. **requirements.txt** - Python dependencies
-11. **README.md** - This documentation file
+- **geosim/** - Main simulation package containing core logic, utilities, visualizations, and interfaces.
+- **tests/** - Comprehensive Pytest test suite.
+- **docs/** - Documentation, including whitepapers and research findings.
+- **main.py** - The main entry point and CLI runner.
+- **requirements.txt** - Python dependencies.
+- **README.md** - This documentation file.
 
 ## Quick Start
 
 ```bash
-# 1. Ensure all 11 files are in the same directory
+# 1. Clone or download the repository
 # 2. Install dependencies
-pip install numpy matplotlib tqdm pytest
+pip install -r requirements.txt
 
-# 3. Run a quick test
-python main.py --nations 20 --steps 100 --seed 42
+# 3. Run a quick test (without visualizations for speed)
+python main.py --nations 20 --steps 100 --seed 42 --no-viz
 
 # 4. Run full simulation
 python main.py --nations 50 --steps 500 --seed 42
@@ -274,7 +271,7 @@ Built on established models from:
 
 ## Troubleshooting
 
-**Import Errors**: Ensure all 11 .py files are in the same directory
+**Import Errors**: Ensure you have installed the project requirements and run the simulation from the root directory.
 
 **Missing Dependencies**: Run `pip install -r requirements.txt`
 
