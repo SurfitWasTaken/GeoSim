@@ -21,12 +21,12 @@ class EventSystem:
         
         # Decolonization wave tracking
         self.recent_independence_events: List[Tuple[int, int, int]] = []  # (step, colonizer_id, colony_id)
-
-    def record_independence_event(self, colonizer_id: int, colony_id: int):
-        self.recent_independence_events.append((self.step, colonizer_id, colony_id))
         
         # Oil embargo tracking
         self.active_embargoes: List[Dict] = []  # {start_step, initiator_id, duration, severity}
+
+    def record_independence_event(self, colonizer_id: int, colony_id: int):
+        self.recent_independence_events.append((self.step, colonizer_id, colony_id))
     
     def process_events(self, nations: List[Nation], economy, step: int, hex_grid=None) -> List[str]:
         """Process all random events for the turn."""
