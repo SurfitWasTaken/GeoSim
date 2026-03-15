@@ -155,6 +155,7 @@ class Nation:
         self.months_since_crisis = 0
         self.resources_extracted: Dict[str, float] = {} # Track extraction for Hubbert curve
         self.resources_initial: Dict[str, float] = {} # Track initial for Hubbert curve
+        self.last_oil_revenue = 0.0 # Dutch disease tracking
         
         # Initialize Sub-Systems
         # Deferred import to avoid circular dependency
@@ -362,6 +363,12 @@ class Nation:
         
         tech_gain = base_gain + spillover
         
+        # Dutch Disease Dampening
+        oil_share = getattr(self, "last_oil_revenue", 0.0) / max(1.0, self.gdp)
+        if oil_share > 0.05:
+            dampening = 1.0 - min(0.8, (oil_share - 0.05) * 2.5)  # Penalise tech growth heavily
+            tech_gain *= max(0.2, dampening)
+        
         # Store old tech for breakthrough detection
         old_tech = self.technology
         self.technology = min(100, self.technology + tech_gain)
@@ -438,18 +445,44 @@ class Nation:
             pass
 
     def update_population(self, config) -> None:
-        """Logistic-ish population update using base growth and carrying capacity."""
-        base = config.pop_growth_base * config.get_realism_multiplier()
-        # health & resources modify growth
-        health_factor = (self.health - 50) / 100.0
-        resource_factor = 0.0
-        if "farmland" in self.resources:
-            resource_factor = min(0.05, self.resources["farmland"] / (1e3 + self.population / 1e6))
-        growth = base + health_factor * 0.001 + resource_factor
-        # logistic cap with stronger convergence
-        carrying = config.pop_max * config.pop_carrying_capacity_factor
-        logistic_factor = 1 - (self.population / carrying) * config.pop_logistic_strength
-        self.population = float(self.population * (1 + growth) * logistic_factor)
+        """Logistic demographic model: Birth rates decline with development; death rates spike on capacity overshoot."""
+        # 1. Effective Carrying Capacity
+        farmland = self.resources.get("farmland", 1.0)
+        water = self.resources.get("water", 1.0)
+        
+        # Tech increases agricultural yield
+        tech_multiplier = 1.0 + (self.technology / 100.0) * 2.0
+        
+        # GDP enables food imports
+        gdp_pc = self.get_gdp_per_capita()
+        import_capacity = 1.0 + (gdp_pc / 50000.0)
+        
+        # Base capacity formulation (1 unit of farmland supports 1M people base)
+        base_carrying_capacity = max(1e6, (farmland * 2e6 + water * 1e6) * tech_multiplier * import_capacity)
+        
+        # 2. Birth Rate (Demographic transition)
+        development_score = (self.health + self.technology) / 2.0
+        birth_rate = 0.035 - (development_score / 100.0) * 0.027
+        birth_rate = max(0.005, birth_rate)
+        
+        # 3. Base Death Rate
+        death_rate = 0.025 - (self.health / 100.0) * 0.015
+        death_rate = max(0.005, death_rate)
+        
+        # 4. Crisis Penalties
+        overshoot_ratio = self.population / max(1.0, base_carrying_capacity)
+        if overshoot_ratio > 1.0:
+            death_rate += 0.02 * (overshoot_ratio - 1.0) ** 2  # Spikes rapidly when exceeding capacity
+            
+        if self.stability < 30:
+            death_rate += 0.005 * ((30 - self.stability) / 10.0)
+        if self.is_at_war:
+            death_rate += 0.005 * (self.war_exhaustion / 50.0)
+            
+        # 5. Net Growth
+        growth_rate = birth_rate - death_rate
+        
+        self.population = float(self.population * (1.0 + growth_rate))
         self.population = max(0.0, self.population)
 
     def update_stability(self, config) -> None:

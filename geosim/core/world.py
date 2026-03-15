@@ -510,10 +510,13 @@ class World:
         """Update global climate state and effects."""
         # Calculate global emissions
         total_gdp = sum(n.gdp for n in self.nations if n.population > 0)
-        total_extraction = sum(
-            nation.resources_extracted.get("oil", 0) * 10  # Oil emits more
-            for nation in self.nations if nation.population > 0
-        )
+        
+        total_tech_activity = sum(n.gdp * (n.technology / 100.0) for n in self.nations if n.population > 0)
+        
+        total_extraction_revenue = 0.0
+        for nation in self.nations:
+            if nation.population > 0 and hasattr(nation, 'last_oil_revenue'):
+                total_extraction_revenue += nation.last_oil_revenue
         
         # Green tech reduces emissions
         green_reduction = 0.0
@@ -521,19 +524,22 @@ class World:
             if nation.population > 0 and nation.technology > 80:
                 # High-tech nations transition to renewables
                 green_tech_factor = (nation.technology - 80) / 20.0  # 0-1 scale
-                nation_emission = nation.gdp * self.config.climate_gdp_factor
+                nation_emission = nation.gdp * 3.5e-4
                 reduction = nation_emission * green_tech_factor * 0.5  # Up to 50% reduction
                 green_reduction += reduction
         
-        global_emissions = (total_gdp * self.config.climate_gdp_factor +
-                           total_extraction * self.config.climate_resource_factor)
+        # Base economic emissions (GDP): ~3.5e-4 tons per $
+        # Tech increases energy intensity
+        # Oil extraction adds heavily
+        global_emissions = (total_gdp * 2.0e-4) + (total_tech_activity * 1.5e-4) + (total_extraction_revenue * 5e-4)
         global_emissions -= green_reduction
+        
+        active_wars = len(self.combat.active_wars)
+        global_emissions += active_wars * 1e9  # 1 gigaton per active war
         
         self.cumulative_carbon += max(0, global_emissions)
         
         # Map to actual temperature rise
-        # IPCC: ~3.7 trillion tons CO2 = ~2°C rise
-        # climate_index represents proportion of budget used
         budget_fraction = self.cumulative_carbon / self.config.carbon_budget_2c
         temperature_rise = budget_fraction * self.config.climate_temp_scaling
         
@@ -753,6 +759,8 @@ class World:
             if nation.population == 0:
                 continue
             
+            nation.last_oil_revenue = 0.0  # Reset for this step
+            
             for resource in ["oil", "rare_earth"]:
                 if resource in nation.resources and nation.resources[resource] > 0:
                     total_initial = nation.resources_initial.get(resource, nation.resources[resource] * 2) # Fallback
@@ -787,9 +795,11 @@ class World:
                     nation.resources_extracted[resource] = extracted_so_far + extracted_amount
                     
                     # Resource extraction boosts GDP
-                    # Value depends on scarcity (global remaining vs initial)
-                    # Simplified: fixed value
-                    nation.gdp += extracted_amount * random.uniform(1e6, 5e6)
+                    revenue = extracted_amount * random.uniform(1e6, 5e6)
+                    nation.gdp += revenue
+                    
+                    if resource == "oil":
+                        nation.last_oil_revenue += revenue
     
     def _update_space_race(self):
         """Update space programs for high-tech nations."""

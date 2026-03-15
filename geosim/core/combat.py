@@ -49,7 +49,7 @@ class WarSystem:
                     continue
                 
                 # Calculate war probability
-                war_prob = self._calculate_war_probability(attacker, defender)
+                war_prob = self._calculate_war_probability(attacker, defender, nations)
                 
                 if random.random() < war_prob:
                     cause = self._determine_war_cause(attacker, defender)
@@ -57,7 +57,7 @@ class WarSystem:
         
         return wars
     
-    def _calculate_war_probability(self, attacker: Nation, defender: Nation) -> float:
+    def _calculate_war_probability(self, attacker: Nation, defender: Nation, nations: List[Nation]) -> float:
         """Calculate probability of war initiation."""
         base_prob = self.config.war_base_probability
         
@@ -70,8 +70,33 @@ class WarSystem:
             if defender.resources.get(resource, 0) > attacker.resources.get(resource, 0) * 2:
                 resource_factor += self.config.war_resource_factor
         
+        # Power imbalance check with alliances
+        nations_dict = {n.id: n for n in nations}
+        
+        att_total_power = attacker.get_total_military_power()
+        att_total_gdp = attacker.gdp
+        for ally_id in attacker.alliances:
+            ally = nations_dict.get(ally_id)
+            if ally and ally.population > 0:
+                att_total_power += ally.get_total_military_power() * 0.5  # Discounted ally contribution
+                att_total_gdp += ally.gdp * 0.5
+                
+        def_total_power = defender.get_total_military_power()
+        def_total_gdp = defender.gdp
+        for ally_id in defender.alliances:
+            ally = nations_dict.get(ally_id)
+            if ally and ally.population > 0:
+                def_total_power += ally.get_total_military_power() * 0.8  # Defenders get better allied support
+                def_total_gdp += ally.gdp * 0.8
+                
+        power_ratio = att_total_power / max(1, def_total_power)
+        gdp_ratio = att_total_gdp / max(1, def_total_gdp)
+        
+        # Suicidal wars are very unlikely
+        if power_ratio < 0.5 and gdp_ratio < 0.5:
+            return 0.0  # Will not attack a vastly superior foe
+            
         # Power imbalance (strong nations attack weak ones)
-        power_ratio = attacker.get_total_military_power() / max(1, defender.get_total_military_power())
         power_factor = 0.01 if power_ratio > 2 else 0
         
         # Government type modifiers (democracies less likely to attack)
@@ -296,9 +321,21 @@ class WarSystem:
         attacker.population -= attacker_casualties
         defender.population -= defender_casualties
         
-        # Economic damage
-        attacker.gdp *= random.uniform(0.95, 0.98)
-        defender.gdp *= random.uniform(0.90, 0.95)
+        # Economic damage (absolute scaling with combat intensity instead of fixed percentage)
+        # Find scale of the battle (based on strength and intensity)
+        combat_scale = (attacker_strength + defender_strength) * war["intensity"] * 1e7 # $ value roughly
+        
+        # Attacker cost
+        att_cost = combat_scale * random.uniform(0.8, 1.2)
+        # Cap at 2% of GDP per step
+        att_cost_capped = min(att_cost, attacker.gdp * 0.02)
+        attacker.gdp = max(1.0, attacker.gdp - att_cost_capped)
+        
+        # Defender cost (suffers more infrastructure damage)
+        def_cost = combat_scale * random.uniform(1.2, 1.8)
+        # Cap at 4% of GDP per step
+        def_cost_capped = min(def_cost, defender.gdp * 0.04)
+        defender.gdp = max(1.0, defender.gdp - def_cost_capped)
         
         # War exhaustion increases
         # Democracies suffer more exhaustion from casualties
