@@ -23,6 +23,9 @@ class SimulationConfig:
     world_width: int = 100
     world_height: int = 100
     
+    # Temporal resolution
+    ticks_per_year: int = 12  # Each tick ≈ 1 month
+
     # Population parameters (UN data calibration)
     pop_min: float = 1e6  # 1 million
     pop_max: float = 200e6  # 200 million
@@ -30,9 +33,9 @@ class SimulationConfig:
     pop_growth_std: float = 0.008
     pop_carrying_capacity_factor: float = 1.5
     pop_logistic_strength: float = 0.0001  # Stronger convergence to carrying capacity
-    
+
     # GDP parameters (Solow-Swan inspired)
-    gdp_min: float = 0.1e12  # $0.1 trillion
+    gdp_min: float = 1e6  # $1 million (safety net only; real floor is population-based)
     gdp_max: float = 20e12  # $20 trillion
     capital_share_alpha: float = 0.33  # Cobb-Douglas parameter
     tfp_growth_base: float = 0.015  # Total factor productivity growth

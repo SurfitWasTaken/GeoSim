@@ -229,7 +229,7 @@ class Nation:
         # 6. Apply External Factors
         new_gdp = raw_gdp * global_trade_multiplier
         if self.is_at_war:
-            new_gdp *= 0.92  # War damage
+            new_gdp *= (0.92 ** (1.0 / 12.0))  # ~8% annual war damage, scaled to monthly
             
         # 7. Capital Accumulation & Convergence
         # Solow model: K_next = K + Investment - Depreciation
@@ -240,12 +240,13 @@ class Nation:
         if k_ratio > 5.0:
             effective_investment_rate *= 0.95 # Diminishing returns to investment
             
-        investment = new_gdp * effective_investment_rate
-        depreciation = K * config.depreciation_rate
+        investment = new_gdp * effective_investment_rate / config.ticks_per_year
+        depreciation = K * config.depreciation_rate / config.ticks_per_year
         self.capital_stock = max(1.0, K + investment - depreciation)
         
-        # Safety bounds
-        new_gdp = max(config.gdp_min, min(config.gdp_max, new_gdp))
+        # Safety bounds (population-proportional floor: $500 GDP/capita minimum)
+        pop_based_min = max(config.gdp_min, self.population * 500)
+        new_gdp = max(pop_based_min, min(config.gdp_max, new_gdp))
             
         self.gdp = float(new_gdp)
         return self.gdp
@@ -300,17 +301,26 @@ class Nation:
         # Normal monetary policy: Taylor Rule
         # Target inflation
         pi_star = config.base_inflation_target
-        
+
         # Current inflation
         pi = self.inflation_rate
-        
+
         # Output gap (y - y*)
-        # Estimate potential GDP using simplified trend or capacity
-        # Here we use recent growth deviation or just assume potential is close to current
-        # Simplified: Output gap is positive if growth is high (>3%), negative if low (<1%)
-        prev_gdp = getattr(self, "_prev_gdp_election", self.gdp * 0.98) # Fallback
+        prev_gdp = getattr(self, "_prev_gdp_election", self.gdp * 0.98)
         growth = (self.gdp / max(1, prev_gdp)) - 1
-        output_gap = growth - 0.02 # Assume 2% is potential growth
+        output_gap = growth - 0.02  # Assume 2% is potential growth
+
+        # --- Phillips Curve: update inflation before Taylor Rule ---
+        inflation_shock = random.gauss(0, 0.003)
+        new_inflation = pi + 0.3 * output_gap + inflation_shock
+        # Central bank effectiveness: high rates dampen inflation
+        rate_effect = (self.currency.interest_rate - pi_star) * 0.1
+        new_inflation -= rate_effect
+        # War premium
+        if self.is_at_war:
+            new_inflation += 0.005
+        self.inflation_rate = max(-0.05, min(0.30, new_inflation))
+        pi = self.inflation_rate
         
         # Taylor Rule
         r_star = 0.02 # Neutral real rate
@@ -496,11 +506,41 @@ class Nation:
         if self.is_at_war:
             death_rate += 0.005 * (self.war_exhaustion / 50.0)
             
-        # 5. Net Growth
-        growth_rate = birth_rate - death_rate
-        
+        # 5. Net Growth (scale annual rates to per-tick)
+        growth_rate = (birth_rate - death_rate) / config.ticks_per_year
+
         self.population = float(self.population * (1.0 + growth_rate))
         self.population = max(0.0, self.population)
+
+    def update_fiscal_balance(self, config) -> None:
+        """Compute government fiscal balance and accumulate debt."""
+        # Effective tax rate varies with stability and development
+        base_tax = 0.15  # 15% baseline (global average effective rate)
+        stability_bonus = (self.stability / 100.0) * 0.05  # Better governance → higher collection
+        tax_rate = base_tax + stability_bonus  # 15-20%
+
+        revenue = self.gdp * tax_rate
+
+        # Government spending: budget allocations + baseline admin costs (~8% GDP)
+        spending_pct = self.budget["military"] + self.budget["research"] + self.budget["welfare"] + 0.08
+        total_spending = self.gdp * spending_pct  # ~23% of GDP
+
+        # War surcharge: military spending doubles during conflict
+        if self.is_at_war:
+            war_extra = self.gdp * self.budget["military"] * 1.5  # Extra 150% military spending
+            total_spending += war_extra
+
+        deficit = total_spending - revenue  # positive = deficit
+
+        # Accumulate or pay down debt (monthly increment)
+        self.debt_to_gdp += deficit / (max(1.0, self.gdp) * config.ticks_per_year)
+
+        # Interest accrual on existing debt stock
+        monthly_rate = self.currency.interest_rate / config.ticks_per_year
+        self.debt_to_gdp *= (1.0 + monthly_rate)
+
+        # Floor at zero (no negative debt)
+        self.debt_to_gdp = max(0.0, self.debt_to_gdp)
 
     def update_stability(self, config) -> None:
         """Update political stability slowly with random shocks and economic health."""

@@ -138,7 +138,7 @@ class GlobalEconomy:
                 # Calculate trade volume
                 trade_volume = gravity * (1 + advantage) * alliance_bonus * geo_penalty * 0.1 # 10% base trade parameter
                 
-                if trade_volume > nation_a.gdp * 0.01:  # Meaningful trade threshold
+                if trade_volume > 1e6:  # $1M minimum meaningful trade threshold
                     self.trade_agreements.append((nation_a.id, nation_b.id))
                     self.trade_volumes[(nation_a.id, nation_b.id)] = trade_volume
                     

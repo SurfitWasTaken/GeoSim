@@ -315,6 +315,9 @@ class World:
             
             # Monetary policy
             nation.manage_monetary_policy(self.config)
+
+            # Fiscal balance and debt accumulation
+            nation.update_fiscal_balance(self.config)
         
         # Colonial relations (FDI already processed above at line 241)
         self.economy.process_colonial_relations(self.nations, event_system=self.events)
@@ -361,6 +364,11 @@ class World:
                 nation.update_inequality()  # Update domestic Gini coefficient
                 nation.update_stability(self.config)
         
+        # Peacetime war exhaustion decay
+        for nation in self.nations:
+            if nation.population > 0 and not nation.is_at_war:
+                nation.war_exhaustion = max(0.0, nation.war_exhaustion * 0.95)
+
         # h. Warfare (including nuclear exchange checks)
         # Pass hex_grid to combat for chokepoint blockade logic
         self.combat.hex_grid = self.hex_grid
