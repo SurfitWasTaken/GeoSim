@@ -54,12 +54,15 @@ class WarSystem:
                 if random.random() < war_prob:
                     cause = self._determine_war_cause(attacker, defender)
                     wars.append((attacker.id, defender.id, cause))
+                    attacker.is_at_war = True
+                    defender.is_at_war = True
+                    break  # One new war per attacker per tick
         
         return wars
     
     def _calculate_war_probability(self, attacker: Nation, defender: Nation, nations: List[Nation]) -> float:
         """Calculate probability of war initiation."""
-        base_prob = self.config.war_base_probability
+        base_prob = self.config.war_base_probability / self.config.ticks_per_year
         
         # Ideological differences
         ideology_factor = abs(attacker.ideology - defender.ideology) * self.config.war_ideology_factor
@@ -110,7 +113,7 @@ class WarSystem:
         total_prob = (base_prob + ideology_factor + resource_factor + 
                      power_factor + economic_desperation) * gov_modifier
         
-        return min(0.15, total_prob)  # Cap at 15% per year
+        return min(0.15 / self.config.ticks_per_year, total_prob)
     
     def _determine_war_cause(self, attacker: Nation, defender: Nation) -> str:
         """Determine the casus belli for war."""
@@ -315,8 +318,8 @@ class WarSystem:
             return self._nuclear_exchange(attacker, defender, war)
         
         # Apply casualties (Lanchester square law)
-        attacker_casualties = defender_strength ** 2 * war["intensity"] * 0.01
-        defender_casualties = attacker_strength ** 2 * war["intensity"] * 0.01
+        attacker_casualties = defender_strength ** 2 * war["intensity"] * 0.001
+        defender_casualties = attacker_strength ** 2 * war["intensity"] * 0.001
         
         attacker.population -= attacker_casualties
         defender.population -= defender_casualties
@@ -328,13 +331,13 @@ class WarSystem:
         # Attacker cost
         att_cost = combat_scale * random.uniform(0.8, 1.2)
         # Cap at 2% of GDP per step
-        att_cost_capped = min(att_cost, attacker.gdp * 0.02)
+        att_cost_capped = min(att_cost, attacker.gdp * 0.005)
         attacker.gdp = max(1.0, attacker.gdp - att_cost_capped)
         
         # Defender cost (suffers more infrastructure damage)
         def_cost = combat_scale * random.uniform(1.2, 1.8)
         # Cap at 4% of GDP per step
-        def_cost_capped = min(def_cost, defender.gdp * 0.04)
+        def_cost_capped = min(def_cost, defender.gdp * 0.01)
         defender.gdp = max(1.0, defender.gdp - def_cost_capped)
         
         # War exhaustion increases

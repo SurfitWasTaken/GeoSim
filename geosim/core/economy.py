@@ -166,6 +166,11 @@ class GlobalEconomy:
         Process Foreign Direct Investment with risk-adjusted returns.
         Includes Capital Flight mechanics during instability.
         """
+        # Reset per-step flow variables (like trade_balance at line 64)
+        for nation in nations:
+            nation.fdi_inflows = 0.0
+            nation.fdi_outflows = 0.0
+
         # 1. Capital Flight Phase
         nations_dict = {n.id: n for n in nations}
         for investor in nations:

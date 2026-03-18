@@ -212,7 +212,7 @@ class Nation:
         # Tech multiplier
         tfp_tech = 1 + self.technology / 100.0
         
-        A_institutions = (self.stability / 100.0) * 1.2
+        A_institutions = max(0.2, (self.stability / 100.0) * 1.2)
         scaling_factor = 0.05 # Calibrated
         A = tfp_base * tfp_tech * A_institutions * scaling_factor
         
@@ -245,7 +245,7 @@ class Nation:
         self.capital_stock = max(1.0, K + investment - depreciation)
         
         # Safety bounds (population-proportional floor: $500 GDP/capita minimum)
-        pop_based_min = max(config.gdp_min, self.population * 500)
+        pop_based_min = max(config.gdp_min, self.population * 2000)
         new_gdp = max(pop_based_min, min(config.gdp_max, new_gdp))
             
         self.gdp = float(new_gdp)
@@ -316,9 +316,13 @@ class Nation:
         # Central bank effectiveness: high rates dampen inflation
         rate_effect = (self.currency.interest_rate - pi_star) * 0.1
         new_inflation -= rate_effect
-        # War premium
+        # War premium: supply destruction + deficit monetization = stagflation
         if self.is_at_war:
-            new_inflation += 0.005
+            war_inflation = random.uniform(0.02, 0.04)
+            # Monetized debt channel: war debt -> money printing -> inflation
+            if self.debt_to_gdp > 0.5:
+                war_inflation += (self.debt_to_gdp - 0.5) * 0.02
+            new_inflation += war_inflation
         self.inflation_rate = max(-0.05, min(0.30, new_inflation))
         pi = self.inflation_rate
         
@@ -502,9 +506,9 @@ class Nation:
             death_rate += 0.02 * (overshoot_ratio - 1.0) ** 2  # Spikes rapidly when exceeding capacity
             
         if self.stability < 30:
-            death_rate += 0.005 * ((30 - self.stability) / 10.0)
+            death_rate += 0.002 * ((30 - self.stability) / 30.0)
         if self.is_at_war:
-            death_rate += 0.005 * (self.war_exhaustion / 50.0)
+            death_rate += 0.002 * (self.war_exhaustion / 100.0)
             
         # 5. Net Growth (scale annual rates to per-tick)
         growth_rate = (birth_rate - death_rate) / config.ticks_per_year

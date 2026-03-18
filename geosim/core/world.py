@@ -63,9 +63,15 @@ class World:
     
     def _initialize_nations(self):
         """Create initial nations with realistic distributions."""
+        used_names = set()
         for i in range(self.config.num_nations):
-            # Generate name
+            # Generate name (with deduplication)
             name = self._generate_nation_name()
+            attempts = 0
+            while name in used_names and attempts < 50:
+                name = self._generate_nation_name()
+                attempts += 1
+            used_names.add(name)
             
             # Random government type (weighted toward democracies/autocracies)
             gov_weights = [0.35, 0.35, 0.1, 0.15, 0.05]  # D, A, Th, Te, An
